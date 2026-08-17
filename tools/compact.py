@@ -63,27 +63,28 @@ def main() -> int:
     n_src = len(list(SRC.glob("*.parquet")))
     print(f"  nguồn : {SRC}  ({n_src:,} file)")
 
-    # TODO(nhiệm vụ 4): hiện thực khung COPY ... TO ... ở phần docstring.
-    #
-    #   con.execute(f"""
-    #       copy (
-    #           select * from read_parquet('{SRC}/*.parquet')
-    #           order by ...
-    #       ) to '{DST}' (
-    #           format parquet,
-    #           partition_by (...),
-    #           overwrite_or_ignore,
-    #           row_group_size ...
-    #       )
-    #   """)
-    #
-    # Sau đó kiểm tra không mất hàng nào:
-    #
-    #   assert <số row dataset cũ> == <số row dataset mới>
+    src_path = SRC.as_posix()
+    dst_path = DST.as_posix()
 
-    print("\n  tools/compact.py chưa được hiện thực — đây là nhiệm vụ 4.")
-    print("  Mở file này, đọc phần KHUNG THỰC HIỆN ở đầu file và điền vào TODO.")
-    print("  Hướng dẫn từng bước: GUIDE.md mục 4.\n")
+    con.execute(f"""
+        copy (
+            select * from read_parquet('{src_path}/*.parquet')
+            order by customer_name, event_time
+        ) to '{dst_path}' (
+            format parquet,
+            partition_by (event_date),
+            overwrite_or_ignore,
+            row_group_size 1000
+        )
+    """)
+
+    n_dst = len(list(DST.rglob("*.parquet")))
+    print(f"  đích  : {DST}  ({n_dst:,} file)")
+
+    n_rows_src = con.execute(f"select count(*) from read_parquet('{src_path}/*.parquet')").fetchone()[0]
+    n_rows_dst = con.execute(f"select count(*) from read_parquet('{dst_path}/**/*.parquet')").fetchone()[0]
+    assert n_rows_src == n_rows_dst, f"Mismatch: {n_rows_src} vs {n_rows_dst}"
+    print(f"  đã nén {n_src} file -> {n_dst} file (tổng {n_rows_dst:,} hàng)")
     return 0
 
 

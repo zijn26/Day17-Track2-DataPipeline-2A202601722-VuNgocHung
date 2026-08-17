@@ -1,11 +1,22 @@
-SHELL   := /bin/bash
-VENV    := .venv
-PY      := $(VENV)/bin/python
-PIP     := $(VENV)/bin/pip
-DBT     := $(VENV)/bin/dbt
+ifneq ($(OS),Windows_NT)
+    SHELL := /bin/bash
+    VENV  := .venv
+    PY    := $(VENV)/bin/python
+    PIP   := $(VENV)/bin/pip
+    DBT   := $(VENV)/bin/dbt
+    PYTHON:= python3
+else
+    VENV  := .venv
+    PY    := $(VENV)/Scripts/python
+    PIP   := $(VENV)/Scripts/pip
+    DBT   := $(VENV)/Scripts/dbt
+    PYTHON:= python
+endif
 
 export LAB17_DB := $(CURDIR)/warehouse.duckdb
 export DBT_PROFILES_DIR := $(CURDIR)/dbt
+export PYTHONUTF8 := 1
+export PYTHONIOENCODING := utf-8
 
 .DEFAULT_GOAL := help
 .PHONY: help setup seed seed-extra pipeline verify quick explain plan dbt-test \
@@ -20,8 +31,8 @@ help:  ## danh sách lệnh
 	@echo ""
 
 setup:  ## venv + thư viện + sinh dữ liệu (chạy một lần)
-	@test -d $(VENV) || python3 -m venv $(VENV)
-	@$(PIP) install -q --upgrade pip
+	@$(PYTHON) -c "import os, sys, subprocess; os.path.exists('$(VENV)') or subprocess.run([sys.executable, '-m', 'venv', '$(VENV)'])"
+	@$(PY) -m pip install -q --upgrade pip
 	@$(PIP) install -q -r requirements.txt
 	@$(PY) seed/generate.py
 	@echo ""
@@ -63,9 +74,9 @@ crash-test:  ## [mở rộng] kịch bản consumer bị giết giữa batch
 	@$(PY) tools/crash_test.py
 
 reset:  ## xoá kho DuckDB (giữ nguyên seed và data/)
-	@rm -f warehouse.duckdb warehouse.duckdb.wal
+	@$(PYTHON) -c "import os; [os.remove(f) for f in ['warehouse.duckdb', 'warehouse.duckdb.wal'] if os.path.exists(f)]"
 	@echo "  kho đã xoá."
 
 clean:  ## xoá kho + target dbt + thư mục làm việc của crash-test
-	@rm -rf warehouse.duckdb warehouse.duckdb.wal dbt/target dbt/logs data/crash
+	@$(PYTHON) -c "import os, shutil; [os.remove(f) if os.path.isfile(f) else shutil.rmtree(f, ignore_errors=True) for f in ['warehouse.duckdb', 'warehouse.duckdb.wal', 'dbt/target', 'dbt/logs', 'data/crash'] if os.path.exists(f)]"
 	@echo "  đã dọn."
