@@ -4,7 +4,7 @@
 
 ---
 
-## 0 · Kết quả `make verify`
+## 0 · Kết quả `make verify` và `make crash-test`
 
 <details>
 <summary>Dán nguyên output ba lần chạy vào đây</summary>
@@ -13,7 +13,7 @@
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   LAB 17 · make verify
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  run 1/3 … 23.3s
+  run 1/3 … 22.8s
   run 2/3 … 23.9s
   run 3/3 … 23.4s
 
@@ -54,7 +54,7 @@
 
 </details>
 
-Tổng kết: **4 / 4 tiêu chí đạt + 5 điểm thưởng Bài A (105 / 100 điểm)**
+Tổng kết: **4 / 4 tiêu chí đạt + 10 điểm thưởng Bài A & Bài B (110 / 100 điểm)**
 
 ---
 
@@ -83,7 +83,12 @@ Tổng kết: **4 / 4 tiêu chí đạt + 5 điểm thưởng Bài A (105 / 100 
 Vì sao chọn P99 làm căn cứ thay vì `max`? Chi phí của mỗi lựa chọn là gì?
 
 > P99 đại diện cho 99% phân bố dữ liệu thực tế, giúp loại bỏ các giá trị ngoại lệ (outliers) rải rác quá xa. Chi phí khi chọn `max` quá lớn hoặc lùi vô thời hạn là công quét (`rows scanned`) và chi phí tính toán lại (`compute cost`) ở MỌI lượt chạy sau này sẽ tăng vọt. Chọn P99 (~3 ngày) là sự cân bằng tối ưu giữa tính chính xác dữ liệu (99–100%) và tài nguyên tính toán.
-
+┌────────────────────┬──────────────────┬────────────────────┬───────────┐
+│      p50_ngay      │     p95_ngay     │      p99_ngay      │ max_ngay  │
+│       double       │      double      │       double       │  double   │
+├────────────────────┼──────────────────┼────────────────────┼───────────┤
+│ 0.1280902777777778 │ 1.81369270833333 │ 2.7258333333333336 │ 2.9446875 │
+└────────────────────┴──────────────────┴────────────────────┴───────────┘
 ---
 
 ## 3 · Kiểu dữ liệu cột priority thay đổi giữa chu kỳ
@@ -104,12 +109,28 @@ Câu hỏi thiết kế: nên chặn ở tầng Bronze hay Silver? Vì sao **kh�
 
 ## 4 · *(mở rộng, không bắt buộc)* Bài trong EXTRA.md
 
+### Bài A — Query dashboard chậm *(+5 điểm)*
+
 | | |
 |---|---|
 | **Bài đã làm** | Bài A — Query dashboard chậm *(+5 điểm)* |
 | **Nguyên nhân** | Dataset gốc `data/gold_events/` gồm 5.000 file Parquet rất nhỏ (small-file problem), không được phân vùng (partition) và không sắp xếp. Ngoài ra, điều kiện lọc cũ `strftime(event_time, '%Y-%m-%d') = '2026-08-09'` bọc cột trong hàm làm vô hiệu hóa khả năng dùng Hive Partitioning và min/max stats pruning. Engine buộc phải mở và quét qua tất cả 5.000 file (5.000.000 rows scanned) tốn 38 giây. |
 | **Cách khắc phục** | 1. Viết `tools/compact.py` dùng `COPY TO` gom 5.000 file nhỏ thành 14 file lớn theo `PARTITION_BY (event_date)`, sắp xếp `ORDER BY customer_name, event_time` và `row_group_size 1000`.<br>2. Sửa `queries/dashboard.sql`: Trỏ vào `data/gold_events_v2/**/*.parquet`, bật `hive_partitioning=true` và đổi lọc thành `event_date = '2026-08-09'`. |
 | **Bằng chứng** | `rows scanned`: 5,000,000 → 9,324 (giảm **536.3×**) · `files`: 5,000 → 14 · `result hash`: `4379e4c5d9f3` (giữ nguyên 100%) · Thời gian chạy: 38s → 29ms |
+
+### Bài B — Consumer gặp sự cố giữa batch *(+5 điểm)*
+
+| | |
+|---|---|
+| **Bài đã làm** | Bài B — Consumer gặp sự cố giữa batch *(+5 điểm)* |
+| **Triệu chứng** | Khi consumer bị kill giữa batch (crash ở lô 7), chạy lại bị mất 500 message (chỉ thu được 9,500 / 10,000 message) do đang ở ngữ nghĩa **at-most-once** (commit offset trước khi ghi dữ liệu). |
+| **Nguyên nhân** | 1. Thứ tự thao tác cũ: `consumer.commit()` chạy TRƯỚC `write_batch()`. Khi crash ở lô 7, offset đã dịch chuyển nhưng dữ liệu chưa ghi, dẫn tới mất dữ liệu lô 7 khi restart.<br>2. Câu lệnh `INSERT INTO` thuần không hỗ trợ xử lý trùng lặp khi chuyển sang at-least-once. |
+| **Cách khắc phục** | 1. Sửa `ingest/consumer.py`: Đổi thứ tự thành `write_batch()` TRƯỚC, `consumer.commit()` SAU (chuyển sang ngữ nghĩa **at-least-once**).<br>2. Thêm `PRIMARY KEY (event_id)` vào DDL bảng `bronze_events_stream`.<br>3. Thay `INSERT` thành `INSERT INTO ... ON CONFLICT (event_id) DO UPDATE SET ...` trong `write_batch()` (phép ghi **Idempotent**). |
+| **Bằng chứng** | Chạy `make crash-test`: Tổng message thu được đúng **10,000 / 10,000** (Chênh lệch: OK — 0 message, không mất, không trùng). |
+
+Câu hỏi cho bài B: `DO UPDATE` khác `DO NOTHING` ở điểm nào khi một message được phát lại với nội dung ĐÃ ĐỔI?
+
+> `DO NOTHING` sẽ bỏ qua hoàn toàn các message trùng `event_id`, giữ nguyên nội dung cũ. Nếu message được phát lại (replay) chứa thông tin cập nhật mới hơn từ upstream, `DO NOTHING` sẽ làm mất các thay đổi mới này. Trong khi đó, `DO UPDATE` sẽ cập nhật nội dung mới nhất vào kho. Vì vậy, ta chọn `DO UPDATE` để đảm bảo tính nhất quán dữ liệu trong kiến trúc Streaming/CDC.
 
 ---
 
